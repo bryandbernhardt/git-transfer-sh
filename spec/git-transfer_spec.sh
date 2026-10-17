@@ -1,19 +1,182 @@
-Describe 'git-transfer.sh'
-  Before
-    SPEC_TEMP=$(mktemp -d)
-    SPEC_SOURCE="$SPEC_TEMP/source"
-    SPEC_SCRIPT="$SHELLSPEC_PROJECT_ROOT/git-transfer.sh"
-    SPEC_SOURCE_EMAIL='corporate@example.com'
-    SPEC_PERSONAL_EMAIL='personal@example.com'
-    mkdir -p "$SPEC_SOURCE"
-    git -C "$SPEC_SOURCE" init -q
-    git -C "$SPEC_SOURCE" config user.name 'Corporate Author'
-    git -C "$SPEC_SOURCE" config user.email "$SPEC_SOURCE_EMAIL"
-  End
+setup_spec() {
+  SPEC_TEMP=$(mktemp -d)
+  SPEC_SOURCE="$SPEC_TEMP/source"
+  SPEC_SCRIPT="$SHELLSPEC_PROJECT_ROOT/git-transfer.sh"
+  SPEC_SOURCE_EMAIL='corporate@example.com'
+  SPEC_PERSONAL_EMAIL='personal@example.com'
+  mkdir -p "$SPEC_SOURCE"
+  git -C "$SPEC_SOURCE" init -q
+  git -C "$SPEC_SOURCE" config user.name 'Corporate Author'
+  git -C "$SPEC_SOURCE" config user.email "$SPEC_SOURCE_EMAIL"
+}
 
-  After
-    rm -rf "$SPEC_TEMP"
-  End
+cleanup_spec() {
+  rm -rf "$SPEC_TEMP"
+}
+
+create_source_commit() {
+  source_message=$1
+  source_date=$2
+  source_file=$3
+  source_content=$4
+  source_parent=${source_file%/*}
+  if [ "$source_parent" != "$source_file" ]; then
+    mkdir -p "$SPEC_SOURCE/$source_parent"
+  fi
+  printf '%s\n' "$source_content" > "$SPEC_SOURCE/$source_file"
+  git -C "$SPEC_SOURCE" add "$source_file"
+  commit_source_change "$source_message" "$source_date"
+}
+
+commit_source_change() {
+  GIT_AUTHOR_DATE=$2 GIT_COMMITTER_DATE=$2 \
+    git -C "$SPEC_SOURCE" commit -q -m "$1"
+}
+
+run_transfer() {
+  printf '%s\n' "$SPEC_SOURCE_EMAIL" "$SPEC_PERSONAL_EMAIL" |
+    (cd "$SPEC_SOURCE" && sh "$SPEC_SCRIPT")
+}
+
+transfer_and_assert_destination() {
+  run_transfer >/dev/null && assert_destination_repository_exists
+}
+
+transfer_and_assert_anonymized_commit() {
+  run_transfer >/dev/null && assert_mirrored_commit_is_anonymized
+}
+
+transfer_and_assert_file_changes() {
+  run_transfer >/dev/null && assert_file_changes_were_mirrored
+}
+
+transfer_and_assert_requested_author() {
+  run_transfer >/dev/null && assert_only_requested_author_was_mirrored
+}
+
+transfer_and_assert_hash_tracking() {
+  run_transfer >/dev/null && assert_processed_hashes_are_recorded
+}
+
+transfer_twice_and_assert_no_duplicate() {
+  run_transfer >/dev/null && run_transfer >/dev/null && assert_commit_was_not_duplicated
+}
+
+transfer_twice_after_removing_hash() {
+  run_transfer >/dev/null && remove_recorded_hashes && run_transfer >/dev/null &&
+    assert_removed_hash_was_reprocessed
+}
+
+transfer_and_assert_merge_is_safe() {
+  run_transfer >/dev/null && assert_mirrored_history_is_safe
+}
+
+transfer_and_assert_empty_commit() {
+  run_transfer >/dev/null && assert_mirrored_empty_commit
+}
+
+destination_repository() {
+  find "$SPEC_TEMP" -type d -name .git -print |
+    while IFS= read -r git_directory; do
+      repository=${git_directory%/.git}
+      if [ "$repository" != "$SPEC_SOURCE" ]; then
+        printf '%s\n' "$repository"
+      fi
+    done
+}
+
+assert_destination_repository_exists() {
+  repository=$(destination_repository)
+  [ -n "$repository" ] && [ -d "$repository/.git" ]
+}
+
+assert_mirrored_commit_is_anonymized() {
+  repository=$(destination_repository)
+  source_date=$(git -C "$SPEC_SOURCE" log -1 --format=%aI)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
+  [ "$(git -C "$repository" log -1 --format=%ae)" = "$SPEC_PERSONAL_EMAIL" ] || return 1
+  [ "$(git -C "$repository" log -1 --format=%aI)" = "$source_date" ] || return 1
+  [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential original message' ] || return 1
+  git -C "$repository" ls-tree -r --name-only HEAD | grep -q '\.js$' || return 1
+  git -C "$repository" show HEAD:app.js | grep -qi 'lorem ipsum' || return 1
+  if git -C "$repository" show HEAD:app.js | grep -q 'corporate'; then
+    return 1
+  fi
+}
+
+assert_file_changes_were_mirrored() {
+  repository=$(destination_repository)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 3 ] || return 1
+  source_dates=$(git -C "$SPEC_SOURCE" log --reverse --format=%aI --author="$SPEC_SOURCE_EMAIL") || return 1
+  destination_dates=$(git -C "$repository" log --reverse --format=%aI) || return 1
+  [ "$destination_dates" = "$source_dates" ] || return 1
+  if git -C "$repository" log --format=%s | grep -Fvx 'Mirrored commit'; then
+    return 1
+  fi
+  if git -C "$repository" log -p | grep -E 'firstSecret|second_secret|Add JavaScript source|Add Python source|Remove JavaScript source'; then
+    return 1
+  fi
+  [ ! -e "$repository/app.js" ] || return 1
+  [ -f "$repository/tools/helper.py" ] || return 1
+  git -C "$repository" show HEAD:tools/helper.py | grep -qi 'lorem ipsum'
+}
+
+assert_only_requested_author_was_mirrored() {
+  repository=$(destination_repository)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
+  [ "$(git -C "$repository" log -1 --format=%ae)" = "$SPEC_PERSONAL_EMAIL" ]
+}
+
+assert_processed_hashes_are_recorded() {
+  repository=$(destination_repository)
+  processed_file="$repository/.processed_commits"
+  original_hash=$(git -C "$SPEC_SOURCE" rev-parse HEAD)
+  [ -f "$processed_file" ] || return 1
+  [ "$(wc -l < "$processed_file" | tr -d ' ')" -eq 1 ] || return 1
+  [ "$(cat "$processed_file")" = "$original_hash" ] || return 1
+  printf '%s\n' "$original_hash" | grep -Eq '^[[:xdigit:]]{40}$'
+}
+
+assert_commit_was_not_duplicated() {
+  repository=$(destination_repository)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ]
+}
+
+remove_recorded_hashes() {
+  repository=$(destination_repository)
+  : > "$repository/.processed_commits"
+}
+
+assert_removed_hash_was_reprocessed() {
+  repository=$(destination_repository)
+  original_hash=$(git -C "$SPEC_SOURCE" rev-parse HEAD)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 2 ] || return 1
+  grep -Fxq "$original_hash" "$repository/.processed_commits"
+}
+
+assert_mirrored_history_is_safe() {
+  repository=$(destination_repository)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -ge 2 ] || return 1
+  if git -C "$repository" log --format=%s | grep -E 'Base corporate|Feature corporate|Main corporate|Merge confidential'; then
+    return 1
+  fi
+  git -C "$repository" ls-tree -r --name-only HEAD | while IFS= read -r path; do
+    if git -C "$repository" show "HEAD:$path" | grep -qi 'corporate secret'; then
+      return 1
+    fi
+  done
+}
+
+assert_mirrored_empty_commit() {
+  repository=$(destination_repository)
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
+  [ -z "$(git -C "$repository" ls-tree -r --name-only HEAD)" ] || return 1
+  [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential empty commit' ]
+}
+
+Describe 'git-transfer.sh'
+  Before 'setup_spec'
+  After 'cleanup_spec'
 
   It 'accepts source and destination emails and creates a destination repository (RF-01, RF-02)'
     create_source_commit 'Initial corporate change' '2020-01-02T03:04:05+00:00' 'app.js' 'const secret = "corporate";'
@@ -94,150 +257,3 @@ Describe 'git-transfer.sh'
     The status should be success
   End
 End
-
-create_source_commit() {
-  source_message=$1
-  source_date=$2
-  source_file=$3
-  source_content=$4
-  printf '%s\n' "$source_content" > "$SPEC_SOURCE/$source_file"
-  git -C "$SPEC_SOURCE" add "$source_file"
-  commit_source_change "$source_message" "$source_date"
-}
-
-commit_source_change() {
-  GIT_AUTHOR_DATE=$2 GIT_COMMITTER_DATE=$2 \
-    git -C "$SPEC_SOURCE" commit -q -m "$1"
-}
-
-run_transfer() {
-  printf '%s\n' "$SPEC_SOURCE_EMAIL" "$SPEC_PERSONAL_EMAIL" |
-    (cd "$SPEC_SOURCE" && sh "$SPEC_SCRIPT")
-}
-
-transfer_and_assert_destination() {
-  run_transfer && assert_destination_repository_exists
-}
-
-transfer_and_assert_anonymized_commit() {
-  run_transfer && assert_mirrored_commit_is_anonymized
-}
-
-transfer_and_assert_file_changes() {
-  run_transfer && assert_file_changes_were_mirrored
-}
-
-transfer_and_assert_requested_author() {
-  run_transfer && assert_only_requested_author_was_mirrored
-}
-
-transfer_and_assert_hash_tracking() {
-  run_transfer && assert_processed_hashes_are_recorded
-}
-
-transfer_twice_and_assert_no_duplicate() {
-  run_transfer && run_transfer && assert_commit_was_not_duplicated
-}
-
-transfer_twice_after_removing_hash() {
-  run_transfer && remove_recorded_hashes && run_transfer &&
-    assert_removed_hash_was_reprocessed
-}
-
-transfer_and_assert_merge_is_safe() {
-  run_transfer && assert_mirrored_history_is_safe
-}
-
-transfer_and_assert_empty_commit() {
-  run_transfer && assert_mirrored_empty_commit
-}
-
-destination_repository() {
-  find "$SPEC_TEMP" -type d -name .git -print |
-    while IFS= read -r git_directory; do
-      repository=${git_directory%/.git}
-      if [ "$repository" != "$SPEC_SOURCE" ]; then
-        printf '%s\n' "$repository"
-      fi
-    done
-}
-
-assert_destination_repository_exists() {
-  repository=$(destination_repository)
-  [ -n "$repository" ] && [ -d "$repository/.git" ]
-}
-
-assert_mirrored_commit_is_anonymized() {
-  repository=$(destination_repository)
-  source_date=$(git -C "$SPEC_SOURCE" log -1 --format=%aI)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
-  [ "$(git -C "$repository" log -1 --format=%ae)" = "$SPEC_PERSONAL_EMAIL" ] || return 1
-  [ "$(git -C "$repository" log -1 --format=%aI)" = "$source_date" ] || return 1
-  [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential original message' ] || return 1
-  git -C "$repository" ls-tree -r --name-only HEAD | grep -q '\.js$' || return 1
-  git -C "$repository" show HEAD:app.js | grep -qi 'lorem ipsum' || return 1
-  if git -C "$repository" show HEAD:app.js | grep -q 'corporate'; then
-    return 1
-  fi
-}
-
-assert_file_changes_were_mirrored() {
-  repository=$(destination_repository)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 3 ] || return 1
-  [ ! -e "$repository/app.js" ] || return 1
-  [ -f "$repository/tools/helper.py" ] || return 1
-  git -C "$repository" show HEAD:tools/helper.py | grep -qi 'lorem ipsum'
-}
-
-assert_only_requested_author_was_mirrored() {
-  repository=$(destination_repository)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
-  [ "$(git -C "$repository" log -1 --format=%ae)" = "$SPEC_PERSONAL_EMAIL" ]
-}
-
-assert_processed_hashes_are_recorded() {
-  repository=$(destination_repository)
-  processed_file="$repository/.processed_commits"
-  original_hash=$(git -C "$SPEC_SOURCE" rev-parse HEAD)
-  [ -f "$processed_file" ] || return 1
-  [ "$(wc -l < "$processed_file" | tr -d ' ')" -eq 1 ] || return 1
-  [ "$(cat "$processed_file")" = "$original_hash" ] || return 1
-  printf '%s\n' "$original_hash" | grep -Eq '^[[:xdigit:]]{40}$'
-}
-
-assert_commit_was_not_duplicated() {
-  repository=$(destination_repository)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ]
-}
-
-remove_recorded_hashes() {
-  repository=$(destination_repository)
-  : > "$repository/.processed_commits"
-}
-
-assert_removed_hash_was_reprocessed() {
-  repository=$(destination_repository)
-  original_hash=$(git -C "$SPEC_SOURCE" rev-parse HEAD)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 2 ] || return 1
-  grep -Fxq "$original_hash" "$repository/.processed_commits"
-}
-
-assert_mirrored_history_is_safe() {
-  repository=$(destination_repository)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -ge 2 ] || return 1
-  if git -C "$repository" log --format=%s | grep -E 'Base corporate|Feature corporate|Main corporate|Merge confidential'; then
-    return 1
-  fi
-  git -C "$repository" ls-tree -r --name-only HEAD | while IFS= read -r path; do
-    if git -C "$repository" show "HEAD:$path" | grep -qi 'corporate secret'; then
-      return 1
-    fi
-  done
-}
-
-assert_mirrored_empty_commit() {
-  repository=$(destination_repository)
-  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
-  [ -z "$(git -C "$repository" ls-tree -r --name-only HEAD)" ] || return 1
-  [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential empty commit' ]
-}
