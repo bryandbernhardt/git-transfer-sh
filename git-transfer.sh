@@ -48,6 +48,12 @@ mirror_author_commits() {
 		if grep -Fxq "$commit_hash" "$destination_directory/.processed_commits"; then
 			continue
 		fi
+		commit_parents=$(git -C "$source_directory" rev-list --parents -n 1 "$commit_hash") || return 1
+		set -- $commit_parents
+		if [ "$#" -gt 2 ]; then
+			printf '%s\n' "$commit_hash" >> "$destination_directory/.processed_commits" || return 1
+			continue
+		fi
 		mirror_commit_changes "$commit_hash" || return 1
 		printf '%s\n' "$commit_hash" >> "$destination_directory/.processed_commits" || return 1
 	done
