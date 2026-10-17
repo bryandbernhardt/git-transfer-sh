@@ -71,7 +71,8 @@ Describe 'git-transfer.sh'
     When call run_transfer
     The output should include 'Total commits'
     The output should include 'Already copied'
-    The output should include 'Processing'
+    The output should include 'Queued: 1'
+    The output should include 'Processing: 1 of 1'
   End
 
   It 'handles merge commits without leaking source content or failing'

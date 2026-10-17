@@ -42,20 +42,34 @@ mirror_commit_changes() {
 }
 
 mirror_author_commits() {
+	processed_file="$destination_directory/.processed_commits"
+	total_commits=$(git -C "$source_directory" log --format='%H%x09%ae' |
+		awk -F "$(printf '\t')" -v email="$source_email" '$2 == email { count++ } END { print count + 0 }') || return 1
+	already_copied=$(git -C "$source_directory" log --format='%H%x09%ae' |
+		awk -F "$(printf '\t')" -v email="$source_email" '$2 == email { print $1 }' |
+		grep -Fxf "$processed_file" | wc -l | tr -d '[:space:]') || return 1
+	queued_commits=$((total_commits - already_copied))
+	current_commit=0
+	printf 'Total commits: %s\n' "$total_commits"
+	printf 'Already copied: %s\n' "$already_copied"
+	printf 'Queued: %s\n' "$queued_commits"
+
 	git -C "$source_directory" log --reverse --format='%H%x09%ae' |
 	while IFS="$(printf '\t')" read -r commit_hash commit_author; do
 		[ "$commit_author" = "$source_email" ] || continue
-		if grep -Fxq "$commit_hash" "$destination_directory/.processed_commits"; then
+		if grep -Fxq "$commit_hash" "$processed_file"; then
 			continue
 		fi
+		current_commit=$((current_commit + 1))
+		printf 'Processing: %s of %s\n' "$current_commit" "$queued_commits"
 		commit_parents=$(git -C "$source_directory" rev-list --parents -n 1 "$commit_hash") || return 1
 		set -- $commit_parents
 		if [ "$#" -gt 2 ]; then
-			printf '%s\n' "$commit_hash" >> "$destination_directory/.processed_commits" || return 1
+			printf '%s\n' "$commit_hash" >> "$processed_file" || return 1
 			continue
 		fi
 		mirror_commit_changes "$commit_hash" || return 1
-		printf '%s\n' "$commit_hash" >> "$destination_directory/.processed_commits" || return 1
+		printf '%s\n' "$commit_hash" >> "$processed_file" || return 1
 	done
 }
 
