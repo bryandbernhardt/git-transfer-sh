@@ -38,14 +38,18 @@ mirror_commit_changes() {
 	commit_date=$(git -C "$source_directory" show -s --format=%aI "$commit_hash") || return 1
 	GIT_AUTHOR_DATE=$commit_date GIT_COMMITTER_DATE=$commit_date \
 		git -C "$destination_directory" -c user.name='Git Transfer' -c user.email="$personal_email" \
-		commit -q -m 'Mirrored commit'
+		commit -q --allow-empty -m 'Mirrored commit'
 }
 
 mirror_author_commits() {
 	git -C "$source_directory" log --reverse --format='%H%x09%ae' |
 	while IFS="$(printf '\t')" read -r commit_hash commit_author; do
 		[ "$commit_author" = "$source_email" ] || continue
+		if grep -Fxq "$commit_hash" "$destination_directory/.processed_commits"; then
+			continue
+		fi
 		mirror_commit_changes "$commit_hash" || return 1
+		printf '%s\n' "$commit_hash" >> "$destination_directory/.processed_commits" || return 1
 	done
 }
 
@@ -70,6 +74,10 @@ main() {
 
 	if ! mkdir -p "$destination_directory" || ! git -C "$destination_directory" init -q; then
 		printf 'Failed to initialize destination repository: %s\n' "$destination_directory" >&2
+		return 1
+	fi
+	if ! : >> "$destination_directory/.processed_commits"; then
+		printf 'Failed to initialize processed commits file: %s\n' "$destination_directory/.processed_commits" >&2
 		return 1
 	fi
 
