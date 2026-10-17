@@ -10,3 +10,4 @@
 | T-06 | Implementar tratamento para casos de borda (merge commits e empty commits) | Casos de Borda | T-04 | Commits de merge são pulados/tratados e flag `--allow-empty` é respeitada |
 | T-07 | Implementar feedback de progresso no terminal | RF-06 | T-05 | Terminal exibe total de commits, quantidade na fila e progresso atualizado |
 | T-08 | Validar execução final e compatibilidade de OS (Linux/MacOS/Windows) | Constituição, CA 1 a 4 | T-07 | Testes finais do ShellSpec passam 100%. `git log` no destino é idêntico nas datas sem vazar código/mensagem. |
+| T-09 | Implementar um workflow para o github executar os testes unitários | @constitution.md, @plan.md | T-08 | Workflow roda e executa os testes do ShellSpec com sucesso |
