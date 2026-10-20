@@ -12,3 +12,4 @@
 | T-08 | Validar execução final e compatibilidade de OS (Linux/MacOS/Windows) | Constituição, CA 1 a 4 | T-07 | Testes finais do ShellSpec passam 100%. `git log` no destino é idêntico nas datas sem vazar código/mensagem. |
 | T-09 | Implementar um workflow para o github executar os testes unitários | @constitution.md, @plan.md | T-08 | Workflow roda e executa os testes do ShellSpec com sucesso |
 | T-10 | Implementar um README.md para o github | @constitution.md, @plan.md, @spec.md, @tasks.md | T-09 | Arquivo README.md com informações sobre o projeto e instruções mostrando como utilizá-lo |
+| T-11 | Corrigir o código para não copiar a estrutura de pastas e nomes dos arquivos de origem | RF-07, RF-08 | T-10 | Arquivo README.md com informações sobre o projeto e instruções mostrando como utilizá-lo |

@@ -50,6 +50,10 @@ transfer_and_assert_file_changes() {
   run_transfer >/dev/null && assert_file_changes_were_mirrored
 }
 
+transfer_and_assert_flattened_files() {
+  run_transfer >/dev/null && assert_files_are_flattened_by_extension
+}
+
 transfer_and_assert_requested_author() {
   run_transfer >/dev/null && assert_only_requested_author_was_mirrored
 }
@@ -97,9 +101,9 @@ assert_mirrored_commit_is_anonymized() {
   [ "$(git -C "$repository" log -1 --format=%ae)" = "$SPEC_PERSONAL_EMAIL" ] || return 1
   [ "$(git -C "$repository" log -1 --format=%aI)" = "$source_date" ] || return 1
   [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential original message' ] || return 1
-  git -C "$repository" ls-tree -r --name-only HEAD | grep -q '\.js$' || return 1
-  git -C "$repository" show HEAD:app.js | grep -qi 'lorem ipsum' || return 1
-  if git -C "$repository" show HEAD:app.js | grep -q 'corporate'; then
+  [ "$(git -C "$repository" ls-tree -r --name-only HEAD)" = file.js ] || return 1
+  git -C "$repository" show HEAD:file.js | grep -qi 'lorem ipsum' || return 1
+  if git -C "$repository" show HEAD:file.js | grep -q 'corporate'; then
     return 1
   fi
 }
@@ -116,9 +120,19 @@ assert_file_changes_were_mirrored() {
   if git -C "$repository" log -p | grep -E 'firstSecret|second_secret|Add JavaScript source|Add Python source|Remove JavaScript source'; then
     return 1
   fi
-  [ ! -e "$repository/app.js" ] || return 1
-  [ -f "$repository/tools/helper.py" ] || return 1
-  git -C "$repository" show HEAD:tools/helper.py | grep -qi 'lorem ipsum'
+  [ "$(git -C "$repository" ls-tree -r --name-only HEAD)" = file.py ] || return 1
+  [ ! -e "$repository/tools" ] || return 1
+  git -C "$repository" show HEAD:file.py | grep -qi 'lorem ipsum'
+}
+
+assert_files_are_flattened_by_extension() {
+  repository=$(destination_repository)
+  destination_paths=$(git -C "$repository" ls-tree -r --name-only HEAD) || return 1
+  [ "$destination_paths" = "$(printf '%s\n' file.js file.py)" ] || return 1
+  [ -f "$repository/file.js" ] || return 1
+  [ -f "$repository/file.py" ] || return 1
+  git -C "$repository" show HEAD:file.js | grep -qi 'lorem ipsum' || return 1
+  git -C "$repository" show HEAD:file.py | grep -qi 'lorem ipsum'
 }
 
 assert_only_requested_author_was_mirrored() {
@@ -197,6 +211,14 @@ Describe 'git-transfer.sh'
     git -C "$SPEC_SOURCE" add -A
     commit_source_change 'Remove JavaScript source' '2020-01-04T03:04:05+00:00'
     When call transfer_and_assert_file_changes
+    The status should be success
+  End
+
+  It 'flattens source paths and maps each extension to a generic filename (RF-07, RF-08)'
+    create_source_commit 'First JavaScript file' '2020-01-02T03:04:05+00:00' 'src/private/app.js' 'first secret'
+    create_source_commit 'Second JavaScript file' '2020-01-03T03:04:05+00:00' 'other/private/module.js' 'second secret'
+    create_source_commit 'Python file' '2020-01-04T03:04:05+00:00' 'tools/private/helper.py' 'third secret'
+    When call transfer_and_assert_flattened_files
     The status should be success
   End
 

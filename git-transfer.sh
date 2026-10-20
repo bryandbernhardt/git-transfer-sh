@@ -11,27 +11,52 @@ read_email() {
 	fi
 }
 
+generic_file_for_path() {
+	source_basename=${1##*/}
+	case "$source_basename" in
+		*.*)
+			path_extension=${source_basename##*.}
+			if [ -n "$path_extension" ]; then
+				generic_file="file.$path_extension"
+			else
+				generic_file=file
+			fi
+			;;
+		*)
+			path_extension=
+			generic_file=file
+			;;
+	esac
+}
+
+source_has_extension() {
+	git -C "$source_directory" ls-tree -r --name-only "$1" |
+		awk -F/ -v extension="$2" '
+			{
+				filename = $NF
+				if (index(filename, ".") > 0) {
+					sub(/^.*[.]/, "", filename)
+				} else {
+					filename = ""
+				}
+				if (filename == extension) found = 1
+			}
+			END { exit !found }
+		'
+}
+
 mirror_commit_changes() {
 	commit_hash=$1
 
 	git -C "$source_directory" diff-tree --root --no-commit-id --name-only -r --no-renames "$commit_hash" |
 	while IFS= read -r path; do
-		if ! git -C "$source_directory" cat-file -e "$commit_hash:$path" 2>/dev/null; then
-			rm -f "$destination_directory/$path" || return 1
-			GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$path" || return 1
-		fi
-	done || return 1
-
-	git -C "$source_directory" diff-tree --root --no-commit-id --name-only -r --no-renames "$commit_hash" |
-	while IFS= read -r path; do
-		if git -C "$source_directory" cat-file -e "$commit_hash:$path" 2>/dev/null; then
-			rm -rf "$destination_directory/$path" || return 1
-			parent_directory=${path%/*}
-			if [ "$parent_directory" != "$path" ]; then
-				mkdir -p "$destination_directory/$parent_directory" || return 1
-			fi
-			printf '%s\n' 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.' > "$destination_directory/$path" || return 1
-			GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$path" || return 1
+		generic_file_for_path "$path"
+		if source_has_extension "$commit_hash" "$path_extension"; then
+			printf '%s\n' 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.' > "$destination_directory/$generic_file" || return 1
+			GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$generic_file" || return 1
+		elif [ -e "$destination_directory/$generic_file" ]; then
+			rm -f "$destination_directory/$generic_file" || return 1
+			GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$generic_file" || return 1
 		fi
 	done || return 1
 

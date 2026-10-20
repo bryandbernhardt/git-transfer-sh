@@ -13,7 +13,7 @@ Implementa a especificação do script, respeitando a constituição do projeto.
 
 ## Modelo de dados
 - **Controle de Hashes (`.processed_commits`):** Arquivo de texto simples de coluna única, contendo apenas o SHA-1 original em cada linha (garante alta performance para o comando `grep` e fácil manipulação pelo programador).
-- **Arquivos Genéricos:** Textos estáticos (ex: "Lorem Ipsum") que substituirão o código fonte corporativo, mantendo apenas a extensão do arquivo (ex: `.js`, `.py`).
+- **Arquivos Genéricos:** Textos estáticos (ex: "Lorem Ipsum") e um arquivo para cada extensão com o título file que substituirão o código fonte corporativo, mantendo apenas a extensão do arquivo (ex: `.js`, `.py`).
 
 ## Contratos
 - O sistema recebe *inputs* exclusivamente via prompt interativo no terminal no momento da execução (e-mail corporativo, e-mail pessoal).

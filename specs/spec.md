@@ -21,6 +21,8 @@ Fornecer uma ferramenta de linha de comando (CLI) que extraia os metadados e a v
 - **RF-04:** O sistema deve registrar o *hash identificador (SHA-1)* de cada commit processado em um arquivo local de controle (ex: `.commits_copiados`), para evitar duplicações em execuções futuras.
 - **RF-05:** Se o usuário manipular o arquivo de controle e remover o *hash* de um commit, o sistema deve ser capaz de reprocessar esse commit na próxima execução.
 - **RF-06:** O script deve exibir no terminal o progresso da operação: total de commits encontrados, quantos já estavam copiados e quantos estão sendo processados agora.
+- **RF-07:** O script deve criar um arquivo para cada extensão existente, caso o arquivo já exista, apenas aplicar as alterações ao arquivo já existente.
+- **RF-08:** O script deve criar todos os arquivos na raiz do repositório clone, sem copiar a estrutura de arquivos e pastas do projeto de origem.
 
 ## Regras de Negócio 
 - **RN-01:** O arquivo de controle deve armazenar apenas o *hash (SHA-1)* do commit original. Sob nenhuma hipótese o código-fonte original ou a mensagem original do commit devem ser lidos para armazenamento ou replicados no destino.
