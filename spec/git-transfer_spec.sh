@@ -89,6 +89,40 @@ destination_repository() {
     done
 }
 
+blob_sizes_by_extension() {
+  repository=$1
+  commit_hash=$2
+  tab=$(printf '\t')
+  git -C "$repository" ls-tree -r -l "$commit_hash" |
+    awk -F "$tab" '
+      {
+        split($1, metadata, " ")
+        basename = $2
+        sub(/^.*\//, "", basename)
+        if (index(basename, ".") > 0) {
+          sub(/^.*[.]/, "", basename)
+        } else {
+          basename = ""
+        }
+        totals[basename] += metadata[4] + 0
+        present[basename] = 1
+      }
+      END {
+        for (extension in present) {
+          printf "%s\t%d\n", extension, totals[extension]
+        }
+      }
+    ' | sort
+}
+
+assert_snapshot_sizes_match() {
+  source_commit=$1
+  destination_commit=$2
+  source_sizes=$(blob_sizes_by_extension "$SPEC_SOURCE" "$source_commit") || return 1
+  destination_sizes=$(blob_sizes_by_extension "$repository" "$destination_commit") || return 1
+  [ "$destination_sizes" = "$source_sizes" ]
+}
+
 assert_destination_repository_exists() {
   repository=$(destination_repository)
   [ -n "$repository" ] && [ -d "$repository/.git" ]
@@ -102,8 +136,9 @@ assert_mirrored_commit_is_anonymized() {
   [ "$(git -C "$repository" log -1 --format=%aI)" = "$source_date" ] || return 1
   [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential original message' ] || return 1
   [ "$(git -C "$repository" ls-tree -r --name-only HEAD)" = file.js ] || return 1
-  git -C "$repository" show HEAD:file.js | grep -qi 'lorem ipsum' || return 1
-  if git -C "$repository" show HEAD:file.js | grep -q 'corporate'; then
+  assert_snapshot_sizes_match "$(git -C "$SPEC_SOURCE" rev-parse HEAD)" \
+    "$(git -C "$repository" rev-parse HEAD)" || return 1
+  if git -C "$repository" show HEAD:file.js | grep -Eq '[^A-Za-z0-9]'; then
     return 1
   fi
 }
@@ -122,17 +157,38 @@ assert_file_changes_were_mirrored() {
   fi
   [ "$(git -C "$repository" ls-tree -r --name-only HEAD)" = file.py ] || return 1
   [ ! -e "$repository/tools" ] || return 1
-  git -C "$repository" show HEAD:file.py | grep -qi 'lorem ipsum'
+  assert_snapshot_sizes_match "$(git -C "$SPEC_SOURCE" rev-parse HEAD)" \
+    "$(git -C "$repository" rev-parse HEAD)"
 }
 
 assert_files_are_flattened_by_extension() {
   repository=$(destination_repository)
+  destination_tree_count=$(git -C "$repository" log --format=%T --reverse | sort -u | wc -l | tr -d '[:space:]')
+  [ "$destination_tree_count" -eq 4 ] || return 1
   destination_paths=$(git -C "$repository" ls-tree -r --name-only HEAD) || return 1
-  [ "$destination_paths" = "$(printf '%s\n' file.js file.py)" ] || return 1
+  [ "$destination_paths" = "$(printf '%s\n' file.gitkeep file.js file.py)" ] || return 1
+  [ -f "$repository/file.gitkeep" ] || return 1
+  [ ! -s "$repository/file.gitkeep" ] || return 1
   [ -f "$repository/file.js" ] || return 1
   [ -f "$repository/file.py" ] || return 1
-  git -C "$repository" show HEAD:file.js | grep -qi 'lorem ipsum' || return 1
-  git -C "$repository" show HEAD:file.py | grep -qi 'lorem ipsum'
+  source_commit_one=$(git -C "$SPEC_SOURCE" log --reverse --format=%H --author="$SPEC_SOURCE_EMAIL" | sed -n '1p')
+  source_commit_two=$(git -C "$SPEC_SOURCE" log --reverse --format=%H --author="$SPEC_SOURCE_EMAIL" | sed -n '2p')
+  source_commit_three=$(git -C "$SPEC_SOURCE" log --reverse --format=%H --author="$SPEC_SOURCE_EMAIL" | sed -n '3p')
+  source_commit_four=$(git -C "$SPEC_SOURCE" log --reverse --format=%H --author="$SPEC_SOURCE_EMAIL" | sed -n '4p')
+  destination_commit_one=$(git -C "$repository" log --reverse --format=%H | sed -n '1p')
+  destination_commit_two=$(git -C "$repository" log --reverse --format=%H | sed -n '2p')
+  destination_commit_three=$(git -C "$repository" log --reverse --format=%H | sed -n '3p')
+  destination_commit_four=$(git -C "$repository" log --reverse --format=%H | sed -n '4p')
+  assert_snapshot_sizes_match "$source_commit_one" "$destination_commit_one" || return 1
+  assert_snapshot_sizes_match "$source_commit_two" "$destination_commit_two" || return 1
+  assert_snapshot_sizes_match "$source_commit_three" "$destination_commit_three" || return 1
+  assert_snapshot_sizes_match "$source_commit_four" "$destination_commit_four" || return 1
+  for generic_file in "$repository"/file*; do
+    [ -f "$generic_file" ] || continue
+    if LC_ALL=C grep -Eq '[^A-Za-z0-9]' "$generic_file"; then
+      return 1
+    fi
+  done
 }
 
 assert_only_requested_author_was_mirrored() {
@@ -218,6 +274,9 @@ Describe 'git-transfer.sh'
     create_source_commit 'First JavaScript file' '2020-01-02T03:04:05+00:00' 'src/private/app.js' 'first secret'
     create_source_commit 'Second JavaScript file' '2020-01-03T03:04:05+00:00' 'other/private/module.js' 'second secret'
     create_source_commit 'Python file' '2020-01-04T03:04:05+00:00' 'tools/private/helper.py' 'third secret'
+    : > "$SPEC_SOURCE/empty.gitkeep"
+    git -C "$SPEC_SOURCE" add empty.gitkeep
+    commit_source_change 'Empty placeholder file' '2020-01-05T03:04:05+00:00'
     When call transfer_and_assert_flattened_files
     The status should be success
   End

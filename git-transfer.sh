@@ -11,24 +11,6 @@ read_email() {
 	fi
 }
 
-generic_file_for_path() {
-	source_basename=${1##*/}
-	case "$source_basename" in
-		*.*)
-			path_extension=${source_basename##*.}
-			if [ -n "$path_extension" ]; then
-				generic_file="file.$path_extension"
-			else
-				generic_file=file
-			fi
-			;;
-		*)
-			path_extension=
-			generic_file=file
-			;;
-	esac
-}
-
 source_has_extension() {
 	git -C "$source_directory" ls-tree -r --name-only "$1" |
 		awk -F/ -v extension="$2" '
@@ -45,20 +27,78 @@ source_has_extension() {
 		'
 }
 
+source_extension_sizes() {
+	git -C "$source_directory" ls-tree -r -l "$1" |
+		awk -F "$(printf '\t')" '
+			{
+				split($1, metadata, " ")
+				path = $2
+				path_components = split(path, components, "/")
+				filename = components[path_components]
+				if (index(filename, ".") > 0) {
+					sub(/^.*[.]/, "", filename)
+				} else {
+					filename = ""
+				}
+				totals[filename] += metadata[4] + 0
+				present[filename] = 1
+			}
+			END {
+				for (extension in present) {
+					printf "E%s\t%d\n", extension, totals[extension]
+				}
+			}
+		'
+}
+
+write_random_ascii() {
+	byte_count=$1
+	seed=$2
+	LC_ALL=C awk -v byte_count="$byte_count" -v seed="$seed" '
+		BEGIN {
+			srand(seed)
+			characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+			for (position = 0; position < byte_count; position++) {
+				character_index = int(rand() * length(characters)) + 1
+				printf "%s", substr(characters, character_index, 1)
+			}
+		}
+	'
+}
+
 mirror_commit_changes() {
 	commit_hash=$1
+	source_tree=$(git -C "$source_directory" rev-parse "$commit_hash^{tree}") || return 1
+	tab=$(printf '\t')
 
-	git -C "$source_directory" diff-tree --root --no-commit-id --name-only -r --no-renames "$commit_hash" |
-	while IFS= read -r path; do
-		generic_file_for_path "$path"
-		if source_has_extension "$commit_hash" "$path_extension"; then
-			printf '%s\n' 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.' > "$destination_directory/$generic_file" || return 1
-			GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$generic_file" || return 1
-		elif [ -e "$destination_directory/$generic_file" ]; then
-			rm -f "$destination_directory/$generic_file" || return 1
+	source_extension_sizes "$commit_hash" |
+	while IFS= read -r extension_record; do
+		extension_token=${extension_record%%"$tab"*}
+		byte_count=${extension_record#*"$tab"}
+		path_extension=${extension_token#E}
+		if [ -n "$path_extension" ]; then
+			generic_file="file.$path_extension"
+		else
+			generic_file=file
+		fi
+		content_seed=$(printf '%s\t%s' "$source_tree" "$path_extension" | cksum | awk '{ print $1 }') || return 1
+		write_random_ascii "$byte_count" "$content_seed" > "$destination_directory/$generic_file" || return 1
+		GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$generic_file" || return 1
+	done || return 1
+
+	for generic_path in "$destination_directory"/file*; do
+		[ -f "$generic_path" ] || continue
+		generic_file=${generic_path##*/}
+		if [ "$generic_file" = file ]; then
+			path_extension=
+		else
+			path_extension=${generic_file#file.}
+		fi
+		if ! source_has_extension "$commit_hash" "$path_extension"; then
+			rm -f "$generic_path" || return 1
 			GIT_LITERAL_PATHSPECS=1 git -C "$destination_directory" add -A -- "$generic_file" || return 1
 		fi
-	done || return 1
+	done
 
 	commit_date=$(git -C "$source_directory" show -s --format=%aI "$commit_hash") || return 1
 	GIT_AUTHOR_DATE=$commit_date GIT_COMMITTER_DATE=$commit_date \
