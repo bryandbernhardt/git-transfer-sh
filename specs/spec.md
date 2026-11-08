@@ -10,12 +10,12 @@ Fornecer uma ferramenta de linha de comando (CLI) que extraia os metadados e a v
 - **Programador:** Executa o script via terminal em sua própria máquina.
 
 ## Histórias de Usuário
-- **HU-01:** Como programador, quero rodar o script de dentro da pasta do repositório da empresa, informando meu e-mail atual (origem) e meu e-mail pessoal (destino), para que a ferramenta saiba quais commits deve espelhar.
+- **HU-01:** Como programador, quero rodar o script de dentro da pasta do repositório da empresa, informando meu e-mail atual (origem) e meu e-mail pessoal (destino), para que a ferramenta saiba quais commits deve espelhar. Em execuções futuras, quero poder reutilizar os últimos e-mails informados sem digitá-los novamente.
 - **HU-02:** Como programador, quero que o novo repositório gerado possua apenas arquivos genéricos, um por extensão e na raiz, refletindo o tamanho em bytes dos blobs de cada extensão no snapshot de cada commit de origem. O conteúdo deve ser composto por caracteres ASCII alfanuméricos pseudoaleatórios e ter exatamente a soma dos bytes originais daquela extensão, sem copiar o código. As mensagens originais devem ser substituídas por mensagens genéricas, preservando as datas exatas, sem copiar nomes de arquivos ou estrutura de pastas.
 - **HU-03:** Como programador, quero executar essa ferramenta como um arquivo único em meu sistema operacional, sem precisar instalar bibliotecas extras ou pacotes (assumindo que eu já tenha o Git instalado localmente).
 
 ## Requisitos Funcionais 
-- **RF-01:** O script deve ser executado no diretório atual do repositório corporativo e solicitar/receber os e-mails de origem e destino.
+- **RF-01:** O script deve ser executado no diretório atual do repositório corporativo e solicitar/receber os e-mails de origem e destino. Quando houver valores salvos de uma execução anterior, deve apresentá-los como padrão para que o usuário possa confirmá-los sem redigitá-los ou informar valores diferentes.
 - **RF-02:** O script deve criar uma nova pasta na máquina do usuário para inicializar o repositório espelho.
 - **RF-03:** Para cada commit não merge do autor na origem, o script deve gerar um commit correspondente no destino com a data original (timestamp), e-mail de destino, arquivos genéricos na raiz e uma **mensagem de commit genérica** (ex: "Commit espelhado"). Para cada snapshot, deve somar os tamanhos em bytes de todos os blobs agrupados pela extensão e gerar um arquivo cujo conteúdo ASCII alfanumérico pseudoaleatório tenha exatamente esse total de bytes. Extensões ausentes devem ser removidas e extensões novas criadas. Commits vazios podem permanecer vazios. A mensagem original do commit **não** deve ser copiada.
 - **RF-04:** O sistema deve registrar o *hash identificador (SHA-1)* de cada commit processado em um arquivo local de controle (ex: `.commits_copiados`), para evitar duplicações em execuções futuras.
@@ -23,6 +23,7 @@ Fornecer uma ferramenta de linha de comando (CLI) que extraia os metadados e a v
 - **RF-06:** O script deve exibir no terminal o progresso da operação: total de commits encontrados, quantos já estavam copiados e quantos estão sendo processados agora.
 - **RF-07:** Para preservar a volumetria usada pelo cartão Top Languages do GitHub Readme Stats, o script deve criar um arquivo genérico por extensão presente no snapshot. O tamanho do arquivo deve ser igual à soma, em bytes, dos blobs de origem daquela extensão no mesmo snapshot. O conteúdo deve usar caracteres ASCII alfanuméricos pseudoaleatórios de um byte cada, sem incluir conteúdo original. O arquivo deve ser editado em cada commit selecionado para corresponder ao snapshot daquele commit.
 - **RF-08:** O script deve criar todos os arquivos na raiz do repositório clone, sem copiar a estrutura de arquivos e pastas do projeto de origem.
+- **RF-09:** O script deve salvar localmente os últimos e-mails de origem (`SOURCE_EMAIL`) e destino (`PERSONAL_EMAIL`) informados, para reutilizá-los como padrões na próxima execução. Esses dados devem ficar fora do repositório de origem e do repositório espelhado, sem serem incluídos em commits ou enviados ao destino.
 
 ## Regras de Negócio 
 - **RN-01:** O arquivo de controle deve armazenar apenas o *hash (SHA-1)* do commit original. Sob nenhuma hipótese o código-fonte original ou a mensagem original do commit devem ser lidos para armazenamento ou replicados no destino.
@@ -44,3 +45,4 @@ Fornecer uma ferramenta de linha de comando (CLI) que extraia os metadados e a v
 4. O repositório final gerado deve permitir que o usuário faça `git remote add` e `git push` manualmente sem causar conflitos estruturais.
 5. Cada commit não vazio do autor que não seja merge deve aparecer no histórico do destino com uma alteração genérica correspondente; commits consecutivos da mesma extensão não podem resultar em árvores idênticas.
 6. Para cada commit espelhado, o tamanho de cada arquivo genérico deve ser exatamente igual à soma em bytes dos blobs da mesma extensão no snapshot de origem correspondente. Arquivos de zero bytes devem continuar com zero bytes.
+7. Após informar os e-mails em uma execução, uma execução futura deve apresentá-los como padrões; aceitar os padrões não exige redigitá-los, e o usuário ainda pode informar outros valores. Os e-mails salvos não podem aparecer no repositório espelhado.

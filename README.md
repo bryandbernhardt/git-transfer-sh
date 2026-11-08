@@ -24,6 +24,8 @@ When prompted, enter:
 1. The email address used as the author in the source commits to mirror.
 2. The personal email address to use for the generated commits.
 
+The script saves these values in `~/.git-transfer-sh-emails`, outside the source and generated repositories. On later runs, the saved values appear as prompt defaults; press Enter to reuse them or enter replacements.
+
 The script creates or reuses a sibling directory named `<source-repository>-anonymized`. That directory is initialized as a Git repository. Mirrored files contain generic placeholder text, commit messages are `Mirrored commit`, and the original author timestamps are preserved. The `.processed_commits` file in the generated repository records source commit hashes so rerunning the script does not duplicate commits already processed.
 
 The source repository is not modified. Inspect the generated repository before publishing it. To push it, configure your own remote and push manually, for example:

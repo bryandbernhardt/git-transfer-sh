@@ -10,13 +10,15 @@ Implementa a especificação do script, respeitando a constituição do projeto.
 
 ## Decisões
 - **D-01 (Armazenamento de Estado):** Para atender aos RF-04 e RF-05 sem ferir a Constituição (script puro), o sistema armazenará os hashes dos commits originais em um arquivo de texto plano oculto (dotfile) sem extensão chamado `.processed_commits` na raiz do novo repositório gerado.
+- **D-02 (Persistência dos E-mails):** Para atender ao RF-09, o sistema armazenará apenas o último par de e-mails informado em um arquivo de configuração local no diretório pessoal do usuário. O arquivo fica fora dos repositórios de origem e destino; os prompts seguintes apresentam os valores salvos como padrões, que o usuário pode aceitar ou substituir. Os e-mails não serão gravados no histórico nem nos arquivos do repositório espelhado.
 
 ## Modelo de dados
 - **Controle de Hashes (`.processed_commits`):** Arquivo de texto simples de coluna única, contendo apenas o SHA-1 original em cada linha (garante alta performance para o comando `grep` e fácil manipulação pelo programador).
+- **Preferências de E-mail:** Arquivo local no diretório pessoal do usuário contendo o último `SOURCE_EMAIL` e `PERSONAL_EMAIL`, sem ser adicionado a nenhum repositório.
 - **Arquivos Genéricos:** Para preservar os pesos por bytes usados pelo cartão Top Languages do GitHub Readme Stats, manter um arquivo por extensão na raiz com nome `file.<ext>` (ou `file` sem extensão). Para cada snapshot de origem, somar os tamanhos em bytes dos blobs por extensão via metadados de `git ls-tree -r -l`. Gerar exatamente essa quantidade de caracteres ASCII alfanuméricos pseudoaleatórios (um byte por caractere), sem ler ou copiar conteúdo dos blobs. Usar o hash da árvore mais a extensão como seed para que snapshots diferentes produzam conteúdo reproduzível e árvores de destino distintas; extensões ausentes são removidas e as novas criadas.
 
 ## Contratos
-- O sistema recebe *inputs* exclusivamente via prompt interativo no terminal no momento da execução (e-mail corporativo, e-mail pessoal).
+- O sistema recebe *inputs* via prompt interativo no terminal (e-mail corporativo, e-mail pessoal). Se houver um par salvo localmente, os prompts o apresentam como padrão, permitindo reutilizá-lo com confirmação ou informar outro par.
 - O sistema entrega como *output* uma nova pasta no sistema de arquivos contendo um repositório `.git` fechado e pronto para o usuário realizar um `git push` manual.
 - Antes de cada commit correspondente, sincronizar todos os arquivos genéricos com os totais por extensão do snapshot daquele commit, não somente com os caminhos alterados no commit. Commits vazios sem mudança de árvore podem resultar em commits de destino vazios.
 

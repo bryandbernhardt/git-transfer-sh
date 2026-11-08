@@ -2,11 +2,60 @@
 
 read_email() {
 	prompt=$1
+	default=${2-}
 
-	printf '%s' "$prompt"
+	if [ -n "$default" ]; then
+		printf '%s [%s]: ' "$prompt" "$default"
+	else
+		printf '%s' "$prompt"
+	fi
 	IFS= read -r REPLY || return 1
 	if [ -z "$REPLY" ]; then
-		printf '%s\n' 'Email cannot be empty.' >&2
+		if [ -z "$default" ]; then
+			printf '%s\n' 'Email cannot be empty.' >&2
+			return 1
+		fi
+		REPLY=$default
+	fi
+}
+
+load_email_preferences() {
+	if [ ! -e "$email_preferences_file" ]; then
+		return 0
+	fi
+	if [ ! -f "$email_preferences_file" ] || [ ! -r "$email_preferences_file" ]; then
+		printf 'Unable to read email preferences: %s\n' "$email_preferences_file" >&2
+		return 1
+	fi
+
+	exec 3< "$email_preferences_file" || {
+		printf 'Unable to read email preferences: %s\n' "$email_preferences_file" >&2
+		return 1
+	}
+	if ! IFS= read -r saved_source_email <&3 ||
+		! IFS= read -r saved_personal_email <&3 ||
+		IFS= read -r unexpected_line <&3; then
+		exec 3<&-
+		printf 'Invalid email preferences file: %s\n' "$email_preferences_file" >&2
+		return 1
+	fi
+	exec 3<&-
+	if [ -z "$saved_source_email" ] || [ -z "$saved_personal_email" ]; then
+		printf 'Invalid email preferences file: %s\n' "$email_preferences_file" >&2
+		return 1
+	fi
+}
+
+save_email_preferences() {
+	preferences_temporary_file="$email_preferences_file.tmp.$$"
+	if ! (umask 077 && set -C && printf '%s\n%s\n' "$source_email" "$personal_email" > "$preferences_temporary_file"); then
+		rm -f "$preferences_temporary_file"
+		printf 'Unable to save email preferences: %s\n' "$email_preferences_file" >&2
+		return 1
+	fi
+	if ! mv -f "$preferences_temporary_file" "$email_preferences_file"; then
+		rm -f "$preferences_temporary_file"
+		printf 'Unable to save email preferences: %s\n' "$email_preferences_file" >&2
 		return 1
 	fi
 }
@@ -144,18 +193,36 @@ main() {
 		return 1
 	}
 	destination_directory="${source_directory}-anonymized"
+	if [ -z "${HOME:-}" ]; then
+		printf '%s\n' 'HOME must be set to store email preferences.' >&2
+		return 1
+	fi
+	preferences_home=$(cd "$HOME" 2>/dev/null && pwd -P) || {
+		printf 'Unable to access home directory: %s\n' "$HOME" >&2
+		return 1
+	}
+	email_preferences_file="$preferences_home/.git-transfer-sh-emails"
+	case "$email_preferences_file" in
+		"$source_directory"|"$source_directory"/*|"$destination_directory"|"$destination_directory"/*)
+			printf '%s\n' 'Email preferences must be stored outside the source and destination repositories.' >&2
+			return 1
+			;;
+	esac
+	load_email_preferences || return 1
 
-	read_email 'Source email: ' || {
+	read_email 'Source email:' "$saved_source_email" || {
 		printf '%s\n' 'Failed to read source email.' >&2
 		return 1
 	}
 	source_email=$REPLY
 
-	read_email 'Personal email: ' || {
+	read_email 'Personal email:' "$saved_personal_email" || {
 		printf '%s\n' 'Failed to read personal email.' >&2
 		return 1
 	}
 	personal_email=$REPLY
+
+	save_email_preferences || return 1
 
 	if ! mkdir -p "$destination_directory" || ! git -C "$destination_directory" init -q; then
 		printf 'Failed to initialize destination repository: %s\n' "$destination_directory" >&2

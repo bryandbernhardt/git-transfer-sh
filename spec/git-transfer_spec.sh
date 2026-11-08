@@ -1,10 +1,11 @@
 setup_spec() {
   SPEC_TEMP=$(mktemp -d)
   SPEC_SOURCE="$SPEC_TEMP/source"
+  SPEC_HOME="$SPEC_TEMP/home"
   SPEC_SCRIPT="$SHELLSPEC_PROJECT_ROOT/git-transfer.sh"
   SPEC_SOURCE_EMAIL='corporate@example.com'
   SPEC_PERSONAL_EMAIL='personal@example.com'
-  mkdir -p "$SPEC_SOURCE"
+  mkdir -p "$SPEC_SOURCE" "$SPEC_HOME"
   git -C "$SPEC_SOURCE" init -q
   git -C "$SPEC_SOURCE" config user.name 'Corporate Author'
   git -C "$SPEC_SOURCE" config user.email "$SPEC_SOURCE_EMAIL"
@@ -35,7 +36,12 @@ commit_source_change() {
 
 run_transfer() {
   printf '%s\n' "$SPEC_SOURCE_EMAIL" "$SPEC_PERSONAL_EMAIL" |
-    (cd "$SPEC_SOURCE" && sh "$SPEC_SCRIPT")
+    (cd "$SPEC_SOURCE" && HOME="$SPEC_HOME" sh "$SPEC_SCRIPT")
+}
+
+run_transfer_with_input() {
+  printf '%s\n' "$1" "$2" |
+    (cd "$SPEC_SOURCE" && HOME="$SPEC_HOME" sh "$SPEC_SCRIPT")
 }
 
 transfer_and_assert_destination() {
@@ -244,6 +250,35 @@ assert_mirrored_empty_commit() {
   [ "$(git -C "$repository" log -1 --format=%s)" != 'Confidential empty commit' ]
 }
 
+transfer_and_assert_email_preferences() {
+  preferences_file="$SPEC_HOME/.git-transfer-sh-emails"
+  run_transfer >/dev/null || return 1
+  [ "$(cat "$preferences_file")" = "$(printf '%s\n%s' "$SPEC_SOURCE_EMAIL" "$SPEC_PERSONAL_EMAIL")" ] || return 1
+  repository=$(destination_repository)
+  case "$preferences_file" in
+    "$SPEC_SOURCE"/*|"$repository"/*) return 1 ;;
+  esac
+  [ ! -e "$repository/.git-transfer-sh-emails" ] || return 1
+
+  output=$(printf '\n\n' | (cd "$SPEC_SOURCE" && HOME="$SPEC_HOME" sh "$SPEC_SCRIPT")) || return 1
+  case "$output" in
+    *"Source email: [$SPEC_SOURCE_EMAIL]:"*"Personal email: [$SPEC_PERSONAL_EMAIL]:"*) ;;
+    *) return 1 ;;
+  esac
+  [ "$(git -C "$repository" rev-list --count HEAD)" -eq 1 ] || return 1
+
+  updated_source_email='updated-corporate@example.com'
+  updated_personal_email='updated-personal@example.com'
+  printf '%s\n' 'updated source content' > "$SPEC_SOURCE/updated.txt"
+  git -C "$SPEC_SOURCE" add updated.txt || return 1
+  GIT_AUTHOR_NAME='Corporate Author' GIT_AUTHOR_EMAIL="$updated_source_email" \
+    GIT_COMMITTER_NAME='Corporate Author' GIT_COMMITTER_EMAIL="$updated_source_email" \
+    git -C "$SPEC_SOURCE" commit -q -m 'Updated corporate change' || return 1
+  run_transfer_with_input "$updated_source_email" "$updated_personal_email" >/dev/null || return 1
+  [ "$(cat "$preferences_file")" = "$(printf '%s\n%s' "$updated_source_email" "$updated_personal_email")" ] || return 1
+  [ "$(git -C "$repository" log -1 --format=%ae)" = "$updated_personal_email" ]
+}
+
 Describe 'git-transfer.sh'
   Before 'setup_spec'
   After 'cleanup_spec'
@@ -251,6 +286,12 @@ Describe 'git-transfer.sh'
   It 'accepts source and destination emails and creates a destination repository (RF-01, RF-02)'
     create_source_commit 'Initial corporate change' '2020-01-02T03:04:05+00:00' 'app.js' 'const secret = "corporate";'
     When call transfer_and_assert_destination
+    The status should be success
+  End
+
+  It 'persists, reuses, and allows replacing email preferences outside repositories (RF-01, RF-09, D-02)'
+    create_source_commit 'Initial corporate change' '2020-01-02T03:04:05+00:00' 'app.js' 'const secret = "corporate";'
+    When call transfer_and_assert_email_preferences
     The status should be success
   End
 
